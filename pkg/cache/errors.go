@@ -22,6 +22,9 @@ var (
 
 	// ErrTimeout is returned when a cache operation times out
 	ErrTimeout = errors.New("cache: operation timeout")
+
+	// ErrCircuitOpen is returned when the circuit breaker is in open state
+	ErrCircuitOpen = errors.New("cache: circuit breaker open")
 )
 
 // IsNotFound checks if the given error indicates that a key was not found.
@@ -40,6 +43,12 @@ func IsTimeout(err error) bool {
 // This is a convenience function for checking layer availability.
 func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrLayerUnavailable)
+}
+
+// IsCircuitOpen checks if the given error indicates the circuit breaker is open.
+// This is a convenience function for checking circuit breaker state.
+func IsCircuitOpen(err error) bool {
+	return errors.Is(err, ErrCircuitOpen)
 }
 
 // WrapError wraps an error with additional context about the cache operation.

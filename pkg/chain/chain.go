@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/resilience"
 	"cache-chain/pkg/writer"
 
 	"golang.org/x/sync/singleflight"
@@ -23,14 +24,31 @@ type Chain struct {
 // New creates a new chain of cache layers.
 // Layers should be ordered from fastest to slowest (L1 to LN).
 // Returns an error if no layers are provided.
+// All layers are automatically wrapped with resilience protection.
 func New(layers ...cache.CacheLayer) (*Chain, error) {
 	if len(layers) == 0 {
 		return nil, errors.New("chain: at least one layer required")
 	}
 
-	// Create async writers for each layer (used for warm-up)
-	writers := make([]*writer.AsyncWriter, len(layers))
+	// Wrap each layer with resilience protection
+	resilientLayers := make([]cache.CacheLayer, len(layers))
 	for i, layer := range layers {
+		config := resilience.DefaultResilientConfig()
+
+		// Customize timeout based on layer position
+		// L1 (memory) should be fast, deeper layers can be slower
+		if i == 0 {
+			config = config.WithTimeout(100 * time.Millisecond)
+		} else {
+			config = config.WithTimeout(1 * time.Second)
+		}
+
+		resilientLayers[i] = resilience.NewResilientLayer(layer, config)
+	}
+
+	// Create async writers for each resilient layer (used for warm-up)
+	writers := make([]*writer.AsyncWriter, len(resilientLayers))
+	for i, layer := range resilientLayers {
 		writers[i] = writer.NewAsyncWriter(layer, writer.AsyncWriterConfig{
 			QueueSize:   1000,
 			Workers:     2,
@@ -39,7 +57,7 @@ func New(layers ...cache.CacheLayer) (*Chain, error) {
 	}
 
 	return &Chain{
-		layers:  layers,
+		layers:  resilientLayers,
 		writers: writers,
 		sf:      &singleflight.Group{},
 	}, nil
