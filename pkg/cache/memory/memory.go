@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"cache-chain/pkg/cache"
 )
 
 // MemoryCache is an in-memory cache implementation that satisfies the CacheLayer interface.
@@ -93,7 +95,7 @@ func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) 
 	c.mu.RUnlock()
 
 	if !exists {
-		return nil, errKeyNotFound
+		return nil, cache.ErrKeyNotFound
 	}
 
 	// Check if expired
@@ -102,7 +104,7 @@ func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) 
 		c.mu.Lock()
 		delete(c.data, key)
 		c.mu.Unlock()
-		return nil, errKeyNotFound
+		return nil, cache.ErrKeyNotFound
 	}
 
 	// Update access time for LRU
@@ -256,34 +258,19 @@ type MemoryCacheStats struct {
 // Simple validation: non-empty, no whitespace characters, reasonable length.
 func validateKey(key string) error {
 	if key == "" {
-		return errInvalidKey
+		return cache.ErrInvalidKey
 	}
 
 	if len(key) > 250 {
-		return errInvalidKey
+		return cache.ErrInvalidKey
 	}
 
 	// Check for control characters and whitespace
 	for _, r := range key {
 		if unicode.IsControl(r) || unicode.IsSpace(r) {
-			return errInvalidKey
+			return cache.ErrInvalidKey
 		}
 	}
 
 	return nil
-}
-
-// Cache errors (local to this package)
-var (
-	errKeyNotFound = &cacheError{"key not found"}
-	errInvalidKey  = &cacheError{"invalid key"}
-)
-
-// cacheError implements error
-type cacheError struct {
-	msg string
-}
-
-func (e *cacheError) Error() string {
-	return "cache: " + e.msg
 }

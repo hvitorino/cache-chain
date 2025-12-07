@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/metrics"
 )
 
 // AsyncWriter provides non-blocking cache writes using a worker pool and bounded queue.
@@ -20,11 +21,17 @@ type AsyncWriter struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	config     AsyncWriterConfig
+	metrics    metrics.MetricsCollector
+	layerName  string
 
 	// Statistics (accessed atomically)
 	droppedWrites int64
 	totalWrites   int64
 	failedWrites  int64
+
+	// Metrics ticker for periodic queue depth reporting
+	metricsTicker *time.Ticker
+	metricsStop   chan struct{}
 }
 
 // writeOp represents a pending write operation.
@@ -51,6 +58,11 @@ type AsyncWriterConfig struct {
 // NewAsyncWriter creates a new async writer with bounded queue and worker pool.
 // The writer starts processing immediately and must be closed with Close().
 func NewAsyncWriter(layer cache.CacheLayer, config AsyncWriterConfig) *AsyncWriter {
+	return NewAsyncWriterWithMetrics(layer, config, metrics.NoOpCollector{})
+}
+
+// NewAsyncWriterWithMetrics creates a new async writer with custom metrics collector.
+func NewAsyncWriterWithMetrics(layer cache.CacheLayer, config AsyncWriterConfig, metricsCollector metrics.MetricsCollector) *AsyncWriter {
 	// Apply defaults
 	if config.QueueSize <= 0 {
 		config.QueueSize = 1000
@@ -65,12 +77,16 @@ func NewAsyncWriter(layer cache.CacheLayer, config AsyncWriterConfig) *AsyncWrit
 	ctx, cancel := context.WithCancel(context.Background())
 
 	w := &AsyncWriter{
-		layer:      layer,
-		queue:      make(chan writeOp, config.QueueSize),
-		workers:    config.Workers,
-		ctx:        ctx,
-		cancelFunc: cancel,
-		config:     config,
+		layer:         layer,
+		queue:         make(chan writeOp, config.QueueSize),
+		workers:       config.Workers,
+		ctx:           ctx,
+		cancelFunc:    cancel,
+		config:        config,
+		metrics:       metricsCollector,
+		layerName:     layer.Name(),
+		metricsTicker: time.NewTicker(5 * time.Second), // Report queue depth every 5s
+		metricsStop:   make(chan struct{}),
 	}
 
 	// Start worker pool
@@ -78,6 +94,9 @@ func NewAsyncWriter(layer cache.CacheLayer, config AsyncWriterConfig) *AsyncWrit
 		w.wg.Add(1)
 		go w.worker()
 	}
+
+	// Start metrics reporter
+	go w.reportMetrics()
 
 	return w
 }
@@ -117,6 +136,7 @@ func (w *AsyncWriter) Write(ctx context.Context, key string, value interface{}, 
 		return nil
 	case <-timer.C:
 		atomic.AddInt64(&w.droppedWrites, 1)
+		w.metrics.RecordWriteDropped(w.layerName)
 		return ErrQueueFull
 	case <-ctx.Done():
 		return ctx.Err()
@@ -136,8 +156,14 @@ func (w *AsyncWriter) worker() {
 				// Queue closed
 				return
 			}
-			// Process write operation
+			// Process write operation with timing
+			start := time.Now()
 			err := w.layer.Set(context.Background(), op.key, op.value, op.ttl)
+			duration := time.Since(start)
+
+			success := err == nil
+			w.metrics.RecordAsyncWrite(w.layerName, success, duration)
+
 			if err != nil {
 				atomic.AddInt64(&w.failedWrites, 1)
 				// In Phase 6, this will use structured logging
@@ -151,7 +177,13 @@ func (w *AsyncWriter) worker() {
 					if !ok {
 						return
 					}
+					start := time.Now()
 					err := w.layer.Set(context.Background(), op.key, op.value, op.ttl)
+					duration := time.Since(start)
+
+					success := err == nil
+					w.metrics.RecordAsyncWrite(w.layerName, success, duration)
+
 					if err != nil {
 						atomic.AddInt64(&w.failedWrites, 1)
 					}
@@ -184,6 +216,10 @@ func (w *AsyncWriter) Flush(timeout time.Duration) error {
 // Close stops accepting new writes and waits for workers to complete.
 // Any writes in the queue will be processed before shutdown.
 func (w *AsyncWriter) Close() error {
+	// Stop metrics reporter
+	close(w.metricsStop)
+	w.metricsTicker.Stop()
+
 	// Signal workers to stop after draining queue
 	w.cancelFunc()
 
@@ -191,6 +227,18 @@ func (w *AsyncWriter) Close() error {
 	w.wg.Wait()
 
 	return nil
+}
+
+// reportMetrics periodically reports queue depth.
+func (w *AsyncWriter) reportMetrics() {
+	for {
+		select {
+		case <-w.metricsTicker.C:
+			w.metrics.RecordQueueDepth(w.layerName, len(w.queue))
+		case <-w.metricsStop:
+			return
+		}
+	}
 }
 
 // Stats returns current statistics about the async writer.

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/metrics"
 
 	"github.com/sony/gobreaker"
 )
@@ -15,11 +16,23 @@ type ResilientLayer struct {
 	layer   cache.CacheLayer
 	cb      *gobreaker.CircuitBreaker
 	timeout time.Duration
+	metrics metrics.MetricsCollector
 }
 
 // NewResilientLayer creates a new resilient layer wrapper around the given cache layer.
 // It adds circuit breaker protection and timeout enforcement to all operations.
 func NewResilientLayer(layer cache.CacheLayer, config ResilientConfig) *ResilientLayer {
+	return NewResilientLayerWithMetrics(layer, config, metrics.NoOpCollector{})
+}
+
+// NewResilientLayerWithMetrics creates a new resilient layer with custom metrics collector.
+func NewResilientLayerWithMetrics(layer cache.CacheLayer, config ResilientConfig, metricsCollector metrics.MetricsCollector) *ResilientLayer {
+	rl := &ResilientLayer{
+		layer:   layer,
+		timeout: config.Timeout,
+		metrics: metricsCollector,
+	}
+
 	// Convert our config to gobreaker settings
 	settings := gobreaker.Settings{
 		Name:        layer.Name(),
@@ -40,16 +53,23 @@ func NewResilientLayer(layer cache.CacheLayer, config ResilientConfig) *Resilien
 			return counts.ConsecutiveFailures >= 5
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			// Optional: log state changes
-			// For now, just silent state transitions
+			// Report circuit breaker state changes to metrics
+			var state metrics.CircuitState
+			switch to {
+			case gobreaker.StateClosed:
+				state = metrics.CircuitClosed
+			case gobreaker.StateHalfOpen:
+				state = metrics.CircuitHalfOpen
+			case gobreaker.StateOpen:
+				state = metrics.CircuitOpen
+			}
+			rl.metrics.RecordCircuitState(layer.Name(), state)
 		},
 	}
 
-	return &ResilientLayer{
-		layer:   layer,
-		cb:      gobreaker.NewCircuitBreaker(settings),
-		timeout: config.Timeout,
-	}
+	rl.cb = gobreaker.NewCircuitBreaker(settings)
+
+	return rl
 }
 
 // Name returns the name of the underlying cache layer.
@@ -59,6 +79,9 @@ func (rl *ResilientLayer) Name() string {
 
 // Get retrieves a value from the cache with timeout and circuit breaker protection.
 func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, error) {
+	start := time.Now()
+	layerName := rl.layer.Name()
+
 	// Apply timeout if configured
 	if rl.timeout > 0 {
 		var cancel context.CancelFunc
@@ -70,6 +93,11 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 	result, err := rl.cb.Execute(func() (interface{}, error) {
 		return rl.layer.Get(ctx, key)
 	})
+
+	// Record metrics
+	duration := time.Since(start)
+	hit := err == nil
+	rl.metrics.RecordGet(layerName, hit, duration)
 
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
@@ -88,6 +116,9 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 
 // Set stores a value in the cache with timeout and circuit breaker protection.
 func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	start := time.Now()
+	layerName := rl.layer.Name()
+
 	// Apply timeout if configured
 	if rl.timeout > 0 {
 		var cancel context.CancelFunc
@@ -99,6 +130,11 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 	_, err := rl.cb.Execute(func() (interface{}, error) {
 		return nil, rl.layer.Set(ctx, key, value, ttl)
 	})
+
+	// Record metrics
+	duration := time.Since(start)
+	success := err == nil
+	rl.metrics.RecordSet(layerName, success, duration)
 
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
@@ -117,6 +153,9 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 
 // Delete removes a value from the cache with timeout and circuit breaker protection.
 func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
+	start := time.Now()
+	layerName := rl.layer.Name()
+
 	// Apply timeout if configured
 	if rl.timeout > 0 {
 		var cancel context.CancelFunc
@@ -128,6 +167,11 @@ func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
 	_, err := rl.cb.Execute(func() (interface{}, error) {
 		return nil, rl.layer.Delete(ctx, key)
 	})
+
+	// Record metrics
+	duration := time.Since(start)
+	success := err == nil
+	rl.metrics.RecordDelete(layerName, success, duration)
 
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type

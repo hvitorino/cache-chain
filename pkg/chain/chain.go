@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/metrics"
 	"cache-chain/pkg/resilience"
 	"cache-chain/pkg/writer"
 
@@ -19,47 +20,89 @@ type Chain struct {
 	layers  []cache.CacheLayer
 	writers []*writer.AsyncWriter
 	sf      *singleflight.Group
+	metrics metrics.MetricsCollector
 }
 
-// New creates a new chain of cache layers.
+// ChainConfig holds configuration for Chain creation.
+type ChainConfig struct {
+	// Metrics collector for observability (optional, defaults to NoOpCollector)
+	Metrics metrics.MetricsCollector
+
+	// ResilientConfig for each layer (optional, uses defaults if nil)
+	ResilientConfigs []resilience.ResilientConfig
+
+	// AsyncWriterConfig for each layer (optional, uses defaults if nil)
+	WriterConfigs []writer.AsyncWriterConfig
+}
+
+// New creates a new chain of cache layers with default configuration.
 // Layers should be ordered from fastest to slowest (L1 to LN).
 // Returns an error if no layers are provided.
 // All layers are automatically wrapped with resilience protection.
 func New(layers ...cache.CacheLayer) (*Chain, error) {
+	return NewWithConfig(ChainConfig{}, layers...)
+}
+
+// NewWithConfig creates a new chain with custom configuration.
+func NewWithConfig(config ChainConfig, layers ...cache.CacheLayer) (*Chain, error) {
 	if len(layers) == 0 {
 		return nil, errors.New("chain: at least one layer required")
+	}
+
+	// Default to NoOpCollector if not provided
+	if config.Metrics == nil {
+		config.Metrics = metrics.NoOpCollector{}
 	}
 
 	// Wrap each layer with resilience protection
 	resilientLayers := make([]cache.CacheLayer, len(layers))
 	for i, layer := range layers {
-		config := resilience.DefaultResilientConfig()
+		var resConfig resilience.ResilientConfig
 
-		// Customize timeout based on layer position
-		// L1 (memory) should be fast, deeper layers can be slower
-		if i == 0 {
-			config = config.WithTimeout(100 * time.Millisecond)
+		// Use provided config or default
+		if config.ResilientConfigs != nil && i < len(config.ResilientConfigs) {
+			resConfig = config.ResilientConfigs[i]
 		} else {
-			config = config.WithTimeout(1 * time.Second)
+			resConfig = resilience.DefaultResilientConfig()
+
+			// Customize timeout based on layer position
+			// L1 (memory) should be fast, deeper layers can be slower
+			if i == 0 {
+				resConfig = resConfig.WithTimeout(100 * time.Millisecond)
+			} else {
+				resConfig = resConfig.WithTimeout(1 * time.Second)
+			}
 		}
 
-		resilientLayers[i] = resilience.NewResilientLayer(layer, config)
+		// Pass metrics to resilient layer
+		resilientLayers[i] = resilience.NewResilientLayerWithMetrics(layer, resConfig, config.Metrics)
 	}
 
 	// Create async writers for each resilient layer (used for warm-up)
 	writers := make([]*writer.AsyncWriter, len(resilientLayers))
 	for i, layer := range resilientLayers {
-		writers[i] = writer.NewAsyncWriter(layer, writer.AsyncWriterConfig{
-			QueueSize:   1000,
-			Workers:     2,
-			MaxWaitTime: 10 * time.Millisecond,
-		})
+		var writerConfig writer.AsyncWriterConfig
+
+		// Use provided config or default
+		if config.WriterConfigs != nil && i < len(config.WriterConfigs) {
+			writerConfig = config.WriterConfigs[i]
+		} else {
+			writerConfig = writer.AsyncWriterConfig{
+				QueueSize:   1000,
+				Workers:     2,
+				MaxWaitTime: 10 * time.Millisecond,
+			}
+		}
+
+		// Pass metrics to async writer
+		writers[i] = writer.NewAsyncWriterWithMetrics(layer, writerConfig, config.Metrics)
 	}
 
 	return &Chain{
 		layers:  resilientLayers,
 		writers: writers,
 		sf:      &singleflight.Group{},
+		metrics: config.Metrics,
 	}, nil
 }
 
@@ -84,7 +127,15 @@ func (c *Chain) Get(ctx context.Context, key string) (interface{}, error) {
 
 // getWithFallback performs the actual chain traversal and warm-up.
 func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, error) {
+	start := time.Now()
 	var lastErr error
+	hitLayer := -1
+
+	// Track metrics at the end
+	defer func() {
+		hit := hitLayer >= 0
+		c.metrics.RecordChainGet(hit, hitLayer, time.Since(start))
+	}()
 
 	for i, layer := range c.layers {
 		// Check for context cancellation
@@ -107,6 +158,7 @@ func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, e
 		}
 
 		// Hit! Warm up upper layers synchronously
+		hitLayer = i
 		if i > 0 {
 			c.warmUpperLayers(ctx, key, value, i)
 		}
