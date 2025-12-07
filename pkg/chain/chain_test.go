@@ -93,12 +93,12 @@ func TestChain_Get_L1Hit(t *testing.T) {
 		t.Errorf("Expected 'value-from-l1', got %v", value)
 	}
 
-	if l1.GetCalls != 1 {
-		t.Errorf("L1 should be called once, got %d calls", l1.GetCalls)
+	if l1.GetCalls() != 1 {
+		t.Errorf("L1 should be called once, got %d calls", l1.GetCalls())
 	}
 
-	if l2.GetCalls != 0 {
-		t.Errorf("L2 should not be called, got %d calls", l2.GetCalls)
+	if l2.GetCalls() != 0 {
+		t.Errorf("L2 should not be called, got %d calls", l2.GetCalls())
 	}
 }
 
@@ -136,14 +136,18 @@ func TestChain_Get_L2Hit(t *testing.T) {
 	}
 
 	// Verify calls
-	if l1.GetCalls != 1 {
-		t.Errorf("L1 should be called once, got %d calls", l1.GetCalls)
+	if l1.GetCalls() != 1 {
+		t.Errorf("L1 should be called once, got %d calls", l1.GetCalls())
 	}
-	if l2.GetCalls != 1 {
-		t.Errorf("L2 should be called once, got %d calls", l2.GetCalls)
+	if l2.GetCalls() != 1 {
+		t.Errorf("L2 should be called once, got %d calls", l2.GetCalls())
 	}
-	if l1.SetCalls != 1 {
-		t.Errorf("L1 should be warmed up once, got %d calls", l1.SetCalls)
+
+	// Wait for async warm-up
+	time.Sleep(50 * time.Millisecond)
+
+	if l1.SetCalls() != 1 {
+		t.Errorf("L1 should be warmed up once, got %d calls", l1.SetCalls())
 	}
 }
 
@@ -192,13 +196,17 @@ func TestChain_Get_L3Hit(t *testing.T) {
 	}
 
 	// Verify calls
-	if l1.GetCalls != 1 || l2.GetCalls != 1 || l3.GetCalls != 1 {
+	if l1.GetCalls() != 1 || l2.GetCalls() != 1 || l3.GetCalls() != 1 {
 		t.Errorf("All layers should be called once: L1=%d, L2=%d, L3=%d",
-			l1.GetCalls, l2.GetCalls, l3.GetCalls)
+			l1.GetCalls(), l2.GetCalls(), l3.GetCalls())
 	}
-	if l1.SetCalls != 1 || l2.SetCalls != 1 {
+
+	// Wait for async warm-up
+	time.Sleep(50 * time.Millisecond)
+
+	if l1.SetCalls() != 1 || l2.SetCalls() != 1 {
 		t.Errorf("Both L1 and L2 should be warmed up: L1=%d, L2=%d",
-			l1.SetCalls, l2.SetCalls)
+			l1.SetCalls(), l2.SetCalls())
 	}
 }
 
@@ -289,8 +297,8 @@ func TestChain_Set(t *testing.T) {
 		t.Fatalf("Set failed: %v", err)
 	}
 
-	if l1.SetCalls != 1 || l2.SetCalls != 1 {
-		t.Errorf("Both layers should be called: L1=%d, L2=%d", l1.SetCalls, l2.SetCalls)
+	if l1.SetCalls() != 1 || l2.SetCalls() != 1 {
+		t.Errorf("Both layers should be called: L1=%d, L2=%d", l1.SetCalls(), l2.SetCalls())
 	}
 }
 
@@ -318,8 +326,8 @@ func TestChain_Set_PartialFailure(t *testing.T) {
 	}
 
 	// Both should still be called
-	if l1.SetCalls != 1 || l2.SetCalls != 1 {
-		t.Errorf("Both layers should be called even on failure: L1=%d, L2=%d", l1.SetCalls, l2.SetCalls)
+	if l1.SetCalls() != 1 || l2.SetCalls() != 1 {
+		t.Errorf("Both layers should be called even on failure: L1=%d, L2=%d", l1.SetCalls(), l2.SetCalls())
 	}
 }
 
@@ -339,8 +347,8 @@ func TestChain_Delete(t *testing.T) {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	if l1.DeleteCalls != 1 || l2.DeleteCalls != 1 {
-		t.Errorf("Both layers should be called: L1=%d, L2=%d", l1.DeleteCalls, l2.DeleteCalls)
+	if l1.DeleteCalls() != 1 || l2.DeleteCalls() != 1 {
+		t.Errorf("Both layers should be called: L1=%d, L2=%d", l1.DeleteCalls(), l2.DeleteCalls())
 	}
 }
 
@@ -358,8 +366,8 @@ func TestChain_Close(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	if l1.CloseCalls != 1 || l2.CloseCalls != 1 {
-		t.Errorf("Both layers should be closed: L1=%d, L2=%d", l1.CloseCalls, l2.CloseCalls)
+	if l1.CloseCalls() != 1 || l2.CloseCalls() != 1 {
+		t.Errorf("Both layers should be closed: L1=%d, L2=%d", l1.CloseCalls(), l2.CloseCalls())
 	}
 }
 

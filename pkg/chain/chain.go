@@ -7,14 +7,17 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/writer"
+
 	"golang.org/x/sync/singleflight"
 )
 
 // Chain manages multiple cache layers with automatic fallback and warm-up.
 // Layers are ordered from fastest (L1) to slowest (LN).
 type Chain struct {
-	layers []cache.CacheLayer
-	sf     *singleflight.Group
+	layers  []cache.CacheLayer
+	writers []*writer.AsyncWriter
+	sf      *singleflight.Group
 }
 
 // New creates a new chain of cache layers.
@@ -25,9 +28,20 @@ func New(layers ...cache.CacheLayer) (*Chain, error) {
 		return nil, errors.New("chain: at least one layer required")
 	}
 
+	// Create async writers for each layer (used for warm-up)
+	writers := make([]*writer.AsyncWriter, len(layers))
+	for i, layer := range layers {
+		writers[i] = writer.NewAsyncWriter(layer, writer.AsyncWriterConfig{
+			QueueSize:   1000,
+			Workers:     2,
+			MaxWaitTime: 10 * time.Millisecond,
+		})
+	}
+
 	return &Chain{
-		layers: layers,
-		sf:     &singleflight.Group{},
+		layers:  layers,
+		writers: writers,
+		sf:      &singleflight.Group{},
 	}, nil
 }
 
@@ -89,17 +103,16 @@ func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, e
 	return nil, cache.ErrKeyNotFound
 }
 
-// warmUpperLayers synchronously warms all layers above the hit layer.
+// warmUpperLayers asynchronously warms all layers above the hit layer.
 func (c *Chain) warmUpperLayers(ctx context.Context, key string, value interface{}, hitIndex int) {
 	// Warm up from hit layer up to L1
 	// Use a reasonable default TTL for warm-up (1 hour)
 	ttl := time.Hour
 
 	for i := hitIndex - 1; i >= 0; i-- {
-		layer := c.layers[i]
-		// Warm-up failures don't fail the operation, just log silently for now
-		// In Phase 6, this will be replaced with proper metrics/logging
-		_ = layer.Set(ctx, key, value, ttl)
+		// Use async writer instead of direct Set() - non-blocking
+		// Errors are tracked internally by AsyncWriter
+		_ = c.writers[i].Write(ctx, key, value, ttl)
 	}
 }
 
@@ -152,6 +165,14 @@ func (c *Chain) Delete(ctx context.Context, key string) error {
 func (c *Chain) Close() error {
 	var lastErr error
 
+	// Close async writers first
+	for _, w := range c.writers {
+		if err := w.Close(); err != nil {
+			lastErr = err
+		}
+	}
+
+	// Then close layers
 	for _, layer := range c.layers {
 		if err := layer.Close(); err != nil {
 			lastErr = err

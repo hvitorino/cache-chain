@@ -2,6 +2,7 @@ package mock
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,16 +16,16 @@ type MockLayer struct {
 	NameFunc   func() string
 	CloseFunc  func() error
 
-	// Call tracking
-	GetCalls    int
-	SetCalls    int
-	DeleteCalls int
-	CloseCalls  int
+	// Call tracking (must use atomic operations for race-free access)
+	getCalls    int64
+	setCalls    int64
+	deleteCalls int64
+	closeCalls  int64
 }
 
 // Get implements CacheLayer.Get with optional custom behavior.
 func (m *MockLayer) Get(ctx context.Context, key string) (interface{}, error) {
-	m.GetCalls++
+	atomic.AddInt64(&m.getCalls, 1)
 	if m.GetFunc != nil {
 		return m.GetFunc(ctx, key)
 	}
@@ -33,7 +34,7 @@ func (m *MockLayer) Get(ctx context.Context, key string) (interface{}, error) {
 
 // Set implements CacheLayer.Set with optional custom behavior.
 func (m *MockLayer) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	m.SetCalls++
+	atomic.AddInt64(&m.setCalls, 1)
 	if m.SetFunc != nil {
 		return m.SetFunc(ctx, key, value, ttl)
 	}
@@ -42,7 +43,7 @@ func (m *MockLayer) Set(ctx context.Context, key string, value interface{}, ttl 
 
 // Delete implements CacheLayer.Delete with optional custom behavior.
 func (m *MockLayer) Delete(ctx context.Context, key string) error {
-	m.DeleteCalls++
+	atomic.AddInt64(&m.deleteCalls, 1)
 	if m.DeleteFunc != nil {
 		return m.DeleteFunc(ctx, key)
 	}
@@ -57,9 +58,29 @@ func (m *MockLayer) Name() string {
 	return "mock"
 }
 
+// GetCalls returns the number of Get calls (thread-safe).
+func (m *MockLayer) GetCalls() int {
+	return int(atomic.LoadInt64(&m.getCalls))
+}
+
+// SetCalls returns the number of Set calls (thread-safe).
+func (m *MockLayer) SetCalls() int {
+	return int(atomic.LoadInt64(&m.setCalls))
+}
+
+// DeleteCalls returns the number of Delete calls (thread-safe).
+func (m *MockLayer) DeleteCalls() int {
+	return int(atomic.LoadInt64(&m.deleteCalls))
+}
+
+// CloseCalls returns the number of Close calls (thread-safe).
+func (m *MockLayer) CloseCalls() int {
+	return int(atomic.LoadInt64(&m.closeCalls))
+}
+
 // Close implements CacheLayer.Close with optional custom behavior.
 func (m *MockLayer) Close() error {
-	m.CloseCalls++
+	atomic.AddInt64(&m.closeCalls, 1)
 	if m.CloseFunc != nil {
 		return m.CloseFunc()
 	}
