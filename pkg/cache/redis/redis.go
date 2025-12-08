@@ -19,10 +19,19 @@ type RedisCache struct {
 }
 
 type RedisCacheConfig struct {
-	Name             string
-	Addr             string
-	Username         string
-	Password         string
+	Name string
+	// Addr is the Redis server address for single node/sentinel mode.
+	// For cluster mode, use ClusterAddrs instead.
+	// Examples: "localhost:6379", "redis.example.com:6379"
+	Addr string
+	// ClusterAddrs is a list of Redis cluster node addresses.
+	// If set, cluster mode is enabled automatically.
+	// Example: []string{"node1:6379", "node2:6379", "node3:6379"}
+	ClusterAddrs []string
+	Username     string
+	Password     string
+	// DB is the Redis database number (0-15).
+	// Note: In cluster mode, only DB 0 is supported.
 	DB               int
 	KeyPrefix        string
 	MaxRetries       int
@@ -32,6 +41,13 @@ type RedisCacheConfig struct {
 	PoolSize         int
 	MinIdleConns     int
 	EnablePipelining bool
+	// Sentinel configuration for high availability
+	SentinelMasterSet string
+	// SentinelAddrs is a list of Redis Sentinel addresses.
+	// If set, sentinel mode is enabled.
+	SentinelAddrs    []string
+	SentinelUsername string
+	SentinelPassword string
 }
 
 func DefaultRedisCacheConfig() RedisCacheConfig {
@@ -52,18 +68,67 @@ func DefaultRedisCacheConfig() RedisCacheConfig {
 	}
 }
 
+// ClusterCacheConfig returns a configuration for Redis Cluster mode.
+// clusterAddrs should contain multiple Redis cluster node addresses.
+func ClusterCacheConfig(name string, clusterAddrs []string, password string) RedisCacheConfig {
+	config := DefaultRedisCacheConfig()
+	config.Name = name
+	config.ClusterAddrs = clusterAddrs
+	config.Password = password
+	config.Addr = "" // Clear single node address
+	config.DB = 0    // Cluster only supports DB 0
+	return config
+}
+
+// SentinelCacheConfig returns a configuration for Redis Sentinel mode.
+// sentinelAddrs should contain Redis Sentinel addresses.
+// masterSet is the name of the master set to connect to.
+func SentinelCacheConfig(name string, sentinelAddrs []string, masterSet, password string) RedisCacheConfig {
+	config := DefaultRedisCacheConfig()
+	config.Name = name
+	config.SentinelAddrs = sentinelAddrs
+	config.SentinelMasterSet = masterSet
+	config.Password = password
+	config.Addr = "" // Clear single node address
+	return config
+}
+
 func NewRedisCache(config RedisCacheConfig) (*RedisCache, error) {
 	if config.Name == "" {
 		config.Name = "Redis"
 	}
 
+	// Determine addresses based on configuration
+	var initAddress []string
+	if len(config.ClusterAddrs) > 0 {
+		// Cluster mode: use multiple addresses
+		initAddress = config.ClusterAddrs
+	} else if len(config.SentinelAddrs) > 0 {
+		// Sentinel mode: use sentinel addresses
+		initAddress = config.SentinelAddrs
+	} else if config.Addr != "" {
+		// Single node mode
+		initAddress = []string{config.Addr}
+	} else {
+		return nil, fmt.Errorf("redis: no addresses configured (set Addr, ClusterAddrs, or SentinelAddrs)")
+	}
+
 	clientOpts := rueidis.ClientOption{
-		InitAddress:      []string{config.Addr},
+		InitAddress:      initAddress,
 		Username:         config.Username,
 		Password:         config.Password,
 		SelectDB:         config.DB,
 		ConnWriteTimeout: config.WriteTimeout,
 		MaxFlushDelay:    100 * time.Microsecond,
+	}
+
+	// Configure Sentinel if enabled
+	if len(config.SentinelAddrs) > 0 {
+		clientOpts.Sentinel = rueidis.SentinelOption{
+			MasterSet: config.SentinelMasterSet,
+			Username:  config.SentinelUsername,
+			Password:  config.SentinelPassword,
+		}
 	}
 
 	client, err := rueidis.NewClient(clientOpts)

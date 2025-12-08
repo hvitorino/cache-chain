@@ -6,6 +6,8 @@ Implementation of a high-performance Redis cache layer using the `rueidis` clien
 
 - **High Performance**: Uses `rueidis` - one of the fastest Redis Go clients
 - **Automatic Pipelining**: Built-in support for batching commands to reduce round trips
+- **Redis Cluster Support**: Automatic sharding and high availability
+- **Sentinel Support**: High availability with automatic failover
 - **JSON Serialization**: Automatic marshaling/unmarshaling of complex data types
 - **Context Support**: All operations respect context cancellation and timeouts
 - **Key Prefixing**: Namespace isolation to prevent key collisions
@@ -84,6 +86,72 @@ defer c.Close()
 c.Set(ctx, "product:1", "Widget", time.Hour)
 val, _ := c.Get(ctx, "product:1") // Hits L2, warms L1
 ```
+
+## Deployment Modes
+
+### Single Node (Default)
+
+Standard Redis instance for development and small deployments.
+
+```go
+config := redis.DefaultRedisCacheConfig()
+config.Addr = "redis.example.com:6379"
+config.Password = "secret"
+
+cache, _ := redis.NewRedisCache(config)
+```
+
+### Redis Cluster
+
+For horizontal scaling and high availability with automatic sharding.
+
+```go
+config := redis.ClusterCacheConfig(
+    "Redis-Cluster",
+    []string{
+        "node1.cluster:6379",
+        "node2.cluster:6379",
+        "node3.cluster:6379",
+    },
+    "password",
+)
+config.KeyPrefix = "app:cache:"
+
+cache, _ := redis.NewRedisCache(config)
+```
+
+**Benefits:**
+- Automatic data sharding across nodes
+- High availability with master-replica setup
+- Horizontal scaling by adding nodes
+- No single point of failure
+
+See `examples/redis-cluster/` for complete cluster setup with Docker Compose.
+
+### Redis Sentinel
+
+For high availability with automatic failover (without sharding).
+
+```go
+config := redis.SentinelCacheConfig(
+    "Redis-HA",
+    []string{
+        "sentinel1:26379",
+        "sentinel2:26379",
+        "sentinel3:26379",
+    },
+    "mymaster", // master set name
+    "password",
+)
+
+cache, _ := redis.NewRedisCache(config)
+```
+
+**Benefits:**
+- Automatic master failover
+- Monitoring and notifications
+- Simpler than cluster for smaller deployments
+- Supports all Redis features (unlike cluster DB restrictions)
 
 ## Configuration
 

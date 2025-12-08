@@ -123,3 +123,65 @@ func TestDefaultRedisCacheConfig(t *testing.T) {
 		t.Error("Expected pipelining to be enabled by default")
 	}
 }
+
+func TestClusterCacheConfig(t *testing.T) {
+	clusterAddrs := []string{"node1:6379", "node2:6379", "node3:6379"}
+	config := ClusterCacheConfig("TestCluster", clusterAddrs, "secret")
+
+	if config.Name != "TestCluster" {
+		t.Errorf("Expected name 'TestCluster', got '%s'", config.Name)
+	}
+
+	if len(config.ClusterAddrs) != 3 {
+		t.Errorf("Expected 3 cluster addresses, got %d", len(config.ClusterAddrs))
+	}
+
+	if config.Password != "secret" {
+		t.Errorf("Expected password 'secret', got '%s'", config.Password)
+	}
+
+	if config.Addr != "" {
+		t.Error("Expected Addr to be empty in cluster mode")
+	}
+
+	if config.DB != 0 {
+		t.Error("Expected DB to be 0 in cluster mode")
+	}
+}
+
+func TestSentinelCacheConfig(t *testing.T) {
+	sentinelAddrs := []string{"sentinel1:26379", "sentinel2:26379", "sentinel3:26379"}
+	config := SentinelCacheConfig("TestSentinel", sentinelAddrs, "mymaster", "secret")
+
+	if config.Name != "TestSentinel" {
+		t.Errorf("Expected name 'TestSentinel', got '%s'", config.Name)
+	}
+
+	if len(config.SentinelAddrs) != 3 {
+		t.Errorf("Expected 3 sentinel addresses, got %d", len(config.SentinelAddrs))
+	}
+
+	if config.SentinelMasterSet != "mymaster" {
+		t.Errorf("Expected master set 'mymaster', got '%s'", config.SentinelMasterSet)
+	}
+
+	if config.Password != "secret" {
+		t.Errorf("Expected password 'secret', got '%s'", config.Password)
+	}
+
+	if config.Addr != "" {
+		t.Error("Expected Addr to be empty in sentinel mode")
+	}
+}
+
+func TestNewRedisCache_NoAddressError(t *testing.T) {
+	config := RedisCacheConfig{
+		Name: "NoAddr",
+		// All address fields empty
+	}
+
+	_, err := NewRedisCache(config)
+	if err == nil {
+		t.Error("Expected error when no addresses configured")
+	}
+}
