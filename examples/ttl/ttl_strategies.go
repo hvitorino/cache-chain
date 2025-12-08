@@ -11,7 +11,8 @@ import (
 )
 
 func main() {
-	fmt.Println("=== TTL Strategies Demo ===\n")
+	fmt.Println("=== TTL Strategies Demo ===")
+	fmt.Println()
 
 	// 1. Uniform TTL Strategy
 	demonstrateUniformStrategy()

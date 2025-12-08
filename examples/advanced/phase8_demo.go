@@ -13,7 +13,8 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Phase 8: Advanced Features Demo ===\n")
+	fmt.Println("=== Phase 8: Advanced Features Demo ===")
+	fmt.Println()
 
 	// 1. Negative Caching
 	demonstrateNegativeCaching()
