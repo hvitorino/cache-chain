@@ -43,14 +43,12 @@ func (h *TransactionHandler) GetTransaction(w http.ResponseWriter, r *http.Reque
 		duration := time.Since(start)
 		log.Printf("✓ Cache HIT for %s (took %v)", cacheKey, duration)
 
-		// Type assertion for cached transaction
-		if txMap, ok := value.(map[string]interface{}); ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("X-Cache-Hit", "true")
-			w.Header().Set("X-Response-Time", duration.String())
-			json.NewEncoder(w).Encode(txMap)
-			return
-		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cache-Hit", "true")
+		w.Header().Set("X-Response-Time", duration.String())
+		json.NewEncoder(w).Encode(value)
+		return
+
 	}
 
 	// Cache miss - get from database
