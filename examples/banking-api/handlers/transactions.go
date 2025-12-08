@@ -37,42 +37,21 @@ func (h *TransactionHandler) GetTransaction(w http.ResponseWriter, r *http.Reque
 
 	start := time.Now()
 
-	// Try to get from cache chain (Memory -> Redis -> PostgreSQL)
+	// Get from cache chain (Memory -> Redis -> PostgreSQL)
+	// The chain automatically handles fallback through all layers
 	value, err := h.cache.Get(ctx, cacheKey)
-	if err == nil {
-		duration := time.Since(start)
-		log.Printf("✓ Cache HIT for %s (took %v)", cacheKey, duration)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache-Hit", "true")
-		w.Header().Set("X-Response-Time", duration.String())
-		json.NewEncoder(w).Encode(value)
-		return
-
-	}
-
-	// Cache miss - get from database
-	log.Printf("✗ Cache MISS for %s", cacheKey)
-
-	tx, err := h.db.GetTransaction(ctx, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		log.Printf("✗ Failed to get %s: %v", cacheKey, err)
+		http.Error(w, "Transaction not found", http.StatusNotFound)
 		return
-	}
-
-	// Store in cache chain (L1 and L2 only - L3 is read-only)
-	// The chain will warm up Memory and Redis automatically
-	if err := h.cache.Set(ctx, cacheKey, tx, 5*time.Minute); err != nil {
-		log.Printf("Warning: failed to cache transaction: %v", err)
 	}
 
 	duration := time.Since(start)
-	log.Printf("✓ Loaded from database (took %v)", duration)
+	log.Printf("✓ Retrieved %s (took %v)", cacheKey, duration)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Cache-Hit", "false")
 	w.Header().Set("X-Response-Time", duration.String())
-	json.NewEncoder(w).Encode(tx)
+	json.NewEncoder(w).Encode(value)
 }
 
 func (h *TransactionHandler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
@@ -134,40 +113,21 @@ func (h *TransactionHandler) ListTransactions(w http.ResponseWriter, r *http.Req
 
 	start := time.Now()
 
-	// Try cache first
+	// Get from cache chain (Memory -> Redis -> PostgreSQL)
+	// The chain automatically handles fallback through all layers
 	value, err := h.cache.Get(ctx, cacheKey)
-	if err == nil {
-		duration := time.Since(start)
-		log.Printf("✓ Cache HIT for %s (took %v)", cacheKey, duration)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache-Hit", "true")
-		w.Header().Set("X-Response-Time", duration.String())
-		json.NewEncoder(w).Encode(value)
-		return
-	}
-
-	// Cache miss
-	log.Printf("✗ Cache MISS for %s", cacheKey)
-
-	transactions, err := h.db.ListTransactions(ctx, accountID, 50)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("✗ Failed to get %s: %v", cacheKey, err)
+		http.Error(w, "Failed to retrieve transactions", http.StatusInternalServerError)
 		return
-	}
-
-	// Cache the list in L1 and L2 (L3 is read-only)
-	if err := h.cache.Set(ctx, cacheKey, transactions, 2*time.Minute); err != nil {
-		log.Printf("Warning: failed to cache transactions list: %v", err)
 	}
 
 	duration := time.Since(start)
-	log.Printf("✓ Loaded from database (took %v)", duration)
+	log.Printf("✓ Retrieved %s (took %v)", cacheKey, duration)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Cache-Hit", "false")
 	w.Header().Set("X-Response-Time", duration.String())
-	json.NewEncoder(w).Encode(transactions)
+	json.NewEncoder(w).Encode(value)
 }
 
 func (h *TransactionHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
