@@ -81,7 +81,34 @@ This design ensures:
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### Using Makefile (Recommended)
+
+```bash
+cd examples/banking-api
+
+# Show all available commands
+make help
+
+# Initialize everything (build, start services, seed data)
+make init
+
+# Or quick start (just up + seed)
+make quick-start
+
+# Check API health
+make health
+
+# Run test requests
+make test-api
+
+# View logs
+make logs-api
+
+# Stop services
+make down
+```
+
+### Using Docker Compose Directly
 
 ```bash
 # Start all services (PostgreSQL, Redis, API)
@@ -270,13 +297,51 @@ The API logs cache hits/misses with performance metrics:
 5. **Metrics**: Add Prometheus metrics for cache hit rates
 6. **Distributed Caching**: Use Redis Cluster for horizontal scaling
 
+## Makefile Commands
+
+```bash
+# Basic commands
+make help              # Show all available commands
+make init              # Initialize everything (build, start, seed)
+make quick-start       # Quick start (up + seed)
+make up                # Start all services
+make down              # Stop all services
+make restart           # Restart all services
+make rebuild           # Rebuild everything from scratch
+
+# Development
+make dev               # Start only PostgreSQL and Redis
+make run-local         # Run API locally
+make install           # Install Go dependencies
+
+# Database
+make seed              # Seed database with sample data
+make shell-postgres    # Open PostgreSQL shell
+make shell-redis       # Open Redis CLI
+make stats             # Show cache statistics
+
+# Testing & Monitoring
+make health            # Check API health
+make test-api          # Run API test script
+make benchmark         # Run simple performance benchmark
+make logs              # Show all logs
+make logs-api          # Show API logs only
+make ps                # Show running services
+
+# Maintenance
+make clean             # Clean up Docker resources
+make down-volumes      # Stop and remove volumes
+```
+
 ## Clean Up
 
 ```bash
-# Stop and remove all containers
-docker-compose down -v
+# Using Makefile
+make down-volumes      # Stop and remove all data
+make clean             # Full cleanup
 
-# Remove volumes (will delete all data)
+# Or using Docker Compose directly
+docker-compose down -v
 docker volume prune
 ```
 
