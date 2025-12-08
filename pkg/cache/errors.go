@@ -11,6 +11,9 @@ var (
 	// ErrKeyNotFound is returned when a requested key does not exist in the cache
 	ErrKeyNotFound = errors.New("cache: key not found")
 
+	// ErrCacheMiss is an alias for ErrKeyNotFound, commonly used in cache implementations
+	ErrCacheMiss = ErrKeyNotFound
+
 	// ErrInvalidKey is returned when a cache key is invalid (empty, too long, contains invalid characters)
 	ErrInvalidKey = errors.New("cache: invalid key")
 
