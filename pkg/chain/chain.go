@@ -17,10 +17,11 @@ import (
 // Chain manages multiple cache layers with automatic fallback and warm-up.
 // Layers are ordered from fastest (L1) to slowest (LN).
 type Chain struct {
-	layers  []cache.CacheLayer
-	writers []*writer.AsyncWriter
-	sf      *singleflight.Group
-	metrics metrics.MetricsCollector
+	layers      []cache.CacheLayer
+	writers     []*writer.AsyncWriter
+	sf          *singleflight.Group
+	metrics     metrics.MetricsCollector
+	ttlStrategy TTLStrategy
 }
 
 // ChainConfig holds configuration for Chain creation.
@@ -33,6 +34,9 @@ type ChainConfig struct {
 
 	// AsyncWriterConfig for each layer (optional, uses defaults if nil)
 	WriterConfigs []writer.AsyncWriterConfig
+
+	// TTLStrategy for hierarchical TTL management (optional, defaults to UniformTTLStrategy)
+	TTLStrategy TTLStrategy
 }
 
 // New creates a new chain of cache layers with default configuration.
@@ -52,6 +56,11 @@ func NewWithConfig(config ChainConfig, layers ...cache.CacheLayer) (*Chain, erro
 	// Default to NoOpCollector if not provided
 	if config.Metrics == nil {
 		config.Metrics = metrics.NoOpCollector{}
+	}
+
+	// Default to UniformTTLStrategy if not provided
+	if config.TTLStrategy == nil {
+		config.TTLStrategy = &UniformTTLStrategy{}
 	}
 
 	// Wrap each layer with resilience protection
@@ -99,10 +108,11 @@ func NewWithConfig(config ChainConfig, layers ...cache.CacheLayer) (*Chain, erro
 	}
 
 	return &Chain{
-		layers:  resilientLayers,
-		writers: writers,
-		sf:      &singleflight.Group{},
-		metrics: config.Metrics,
+		layers:      resilientLayers,
+		writers:     writers,
+		sf:          &singleflight.Group{},
+		metrics:     config.Metrics,
+		ttlStrategy: config.TTLStrategy,
 	}, nil
 }
 
@@ -177,9 +187,12 @@ func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, e
 func (c *Chain) warmUpperLayers(ctx context.Context, key string, value interface{}, hitIndex int) {
 	// Warm up from hit layer up to L1
 	// Use a reasonable default TTL for warm-up (1 hour)
-	ttl := time.Hour
+	baseTTL := time.Hour
 
 	for i := hitIndex - 1; i >= 0; i-- {
+		// Calculate TTL for this layer using strategy
+		ttl := c.ttlStrategy.GetTTL(i, baseTTL)
+
 		// Use async writer instead of direct Set() - non-blocking
 		// Errors are tracked internally by AsyncWriter
 		_ = c.writers[i].Write(ctx, key, value, ttl)
@@ -188,10 +201,11 @@ func (c *Chain) warmUpperLayers(ctx context.Context, key string, value interface
 
 // Set writes the value to all layers in the chain.
 // If any layer fails, the error is returned but other layers are still attempted.
+// The TTL is adjusted per layer using the configured TTLStrategy.
 func (c *Chain) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	var lastErr error
 
-	for _, layer := range c.layers {
+	for i, layer := range c.layers {
 		// Check for context cancellation
 		select {
 		case <-ctx.Done():
@@ -199,7 +213,10 @@ func (c *Chain) Set(ctx context.Context, key string, value interface{}, ttl time
 		default:
 		}
 
-		if err := layer.Set(ctx, key, value, ttl); err != nil {
+		// Calculate TTL for this layer using strategy
+		layerTTL := c.ttlStrategy.GetTTL(i, ttl)
+
+		if err := layer.Set(ctx, key, value, layerTTL); err != nil {
 			lastErr = err
 			// Continue to set other layers even if one fails
 		}
