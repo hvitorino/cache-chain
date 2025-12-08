@@ -189,11 +189,6 @@ X-Cache-Hit: true
 X-Response-Time: 123µs
 ```
 
-### List Account Transactions
-```bash
-curl http://localhost:8080/transactions?account_id=ACC001
-```
-
 ## Testing Cache Performance
 
 ```bash

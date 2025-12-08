@@ -73,7 +73,6 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/health", handler.HealthCheck).Methods("GET")
 	r.HandleFunc("/transactions", handler.CreateTransaction).Methods("POST")
-	r.HandleFunc("/transactions", handler.ListTransactions).Methods("GET")
 	r.HandleFunc("/transactions/{id}", handler.GetTransaction).Methods("GET")
 
 	// Setup server

@@ -92,42 +92,9 @@ func (h *TransactionHandler) CreateTransaction(w http.ResponseWriter, r *http.Re
 		log.Printf("Warning: failed to cache new transaction: %v", err)
 	}
 
-	// Invalidate list cache for this account
-	listCacheKey := fmt.Sprintf("transactions:account:%s", req.AccountID)
-	h.cache.Delete(ctx, listCacheKey)
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(tx)
-}
-
-func (h *TransactionHandler) ListTransactions(w http.ResponseWriter, r *http.Request) {
-	accountID := r.URL.Query().Get("account_id")
-	if accountID == "" {
-		http.Error(w, "account_id is required", http.StatusBadRequest)
-		return
-	}
-
-	cacheKey := fmt.Sprintf("transactions:account:%s", accountID)
-	ctx := r.Context()
-
-	start := time.Now()
-
-	// Get from cache chain (Memory -> Redis -> PostgreSQL)
-	// The chain automatically handles fallback through all layers
-	value, err := h.cache.Get(ctx, cacheKey)
-	if err != nil {
-		log.Printf("✗ Failed to get %s: %v", cacheKey, err)
-		http.Error(w, "Failed to retrieve transactions", http.StatusInternalServerError)
-		return
-	}
-
-	duration := time.Since(start)
-	log.Printf("✓ Retrieved %s (took %v)", cacheKey, duration)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Response-Time", duration.String())
-	json.NewEncoder(w).Encode(value)
 }
 
 func (h *TransactionHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
