@@ -118,6 +118,169 @@ L1 (in-memory) → L2 (Redis) → L3 (Database)
 5. **Extensible**: Plugin architecture for custom implementations
 6. **Observable**: Metrics and logging built-in, not bolted-on
 
+## Quick Start
+
+### Running Examples
+
+The library includes several examples demonstrating different features and use cases:
+
+#### 1. Banking Transactions API (Production-Ready Example)
+
+Complete 3-layer cache API with Memory (L1), Redis (L2), and PostgreSQL (L3 read-only).
+
+```bash
+cd examples/banking-api
+
+# Initialize and start the complete stack (PostgreSQL + Redis + API)
+make init
+
+# View available commands
+make help
+
+# Health check
+make health
+
+# Seed sample transactions
+make seed
+
+# Run API tests
+make test-api
+
+# View logs
+make logs
+
+# Stop all services
+make down
+```
+
+**Features:**
+- REST API for banking transactions
+- 3-layer cache architecture (Memory → Redis → PostgreSQL)
+- Docker Compose orchestration
+- Comprehensive Makefile with 27+ commands
+- Health checks and graceful shutdown
+- PostgreSQL as read-only cache layer (L3)
+
+See [examples/banking-api/README.md](examples/banking-api/README.md) for complete documentation.
+
+#### 2. Basic Chain Integration
+
+Simple example showing how to create and use a cache chain:
+
+```bash
+# Run from repository root
+go run examples/chain_integration.go
+```
+
+Demonstrates:
+- Creating memory cache layers
+- Building a cache chain
+- Basic Get/Set operations
+- Cache warming behavior
+
+#### 3. HTTP API Server
+
+REST API exposing cache operations over HTTP:
+
+```bash
+# Run from repository root
+go run examples/api/main.go
+
+# API runs on http://localhost:8080
+# Endpoints: GET/POST /cache/:key, GET /metrics
+```
+
+Demonstrates:
+- HTTP API for cache operations
+- In-memory metrics collection
+- Graceful shutdown
+
+#### 4. Redis Integration
+
+Shows how to use Redis as a cache layer with pipelining:
+
+```bash
+# Start Redis
+docker run -d -p 6379:6379 redis:7-alpine
+
+# Run example
+go run examples/redis/main.go
+```
+
+Demonstrates:
+- Redis cache layer configuration
+- Pipelining for batch operations
+- Connection pooling
+- Multi-layer chain with Redis
+
+#### 5. Redis Cluster Mode
+
+Configuration examples for Redis Cluster and Sentinel:
+
+```bash
+go run examples/redis-cluster/main.go
+```
+
+Demonstrates:
+- Redis Cluster configuration
+- Sentinel (HA) configuration
+- Production deployment options
+
+See [examples/redis-cluster/README.md](examples/redis-cluster/README.md) for cluster setup.
+
+#### 6. Resilience Patterns
+
+Circuit breaker, timeouts, and graceful degradation:
+
+```bash
+go run examples/resilience/main.go
+```
+
+Demonstrates:
+- Automatic circuit breaker protection
+- Timeout handling per layer
+- Fallback behavior
+- Error recovery
+
+### Using the Library Makefile
+
+The repository includes a comprehensive Makefile for development:
+
+```bash
+# Run all tests
+make test
+
+# Run benchmarks
+make bench
+
+# Run specific component tests
+make test-memory
+make test-redis
+make test-chain
+
+# Code quality
+make fmt        # Format code
+make lint       # Run linter
+make vet        # Run go vet
+make check      # Run all quality checks
+
+# Run examples
+make run-redis-example
+make run-resilience-example
+
+# Docker Redis management
+make docker-redis        # Start Redis
+make docker-redis-stop   # Stop Redis
+
+# CI pipeline
+make ci                  # Run full CI (format, vet, coverage)
+make verify              # Quick verification
+make quick               # Fast iteration (fmt + test)
+
+# View all commands
+make help
+```
+
 ## Project Status
 
 🚧 **Under Active Development** - Following phased implementation approach
