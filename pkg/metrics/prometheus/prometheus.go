@@ -231,6 +231,50 @@ func (pc *PrometheusCollector) Register(registry *prometheus.Registry) error {
 	return nil
 }
 
+// Describe implements prometheus.Collector interface
+func (pc *PrometheusCollector) Describe(ch chan<- *prometheus.Desc) {
+	pc.cacheHits.Describe(ch)
+	pc.cacheMisses.Describe(ch)
+	pc.cacheSets.Describe(ch)
+	pc.cacheDeletes.Describe(ch)
+	pc.cacheErrors.Describe(ch)
+	pc.circuitOpens.Describe(ch)
+	pc.circuitState.Describe(ch)
+	pc.queueDepth.Describe(ch)
+	pc.droppedWrites.Describe(ch)
+	pc.asyncWrites.Describe(ch)
+	pc.asyncErrors.Describe(ch)
+	pc.getLatency.Describe(ch)
+	pc.setLatency.Describe(ch)
+	pc.deleteLatency.Describe(ch)
+	pc.asyncLatency.Describe(ch)
+	pc.chainHits.Describe(ch)
+	pc.chainMisses.Describe(ch)
+	pc.chainLatency.Describe(ch)
+}
+
+// Collect implements prometheus.Collector interface
+func (pc *PrometheusCollector) Collect(ch chan<- prometheus.Metric) {
+	pc.cacheHits.Collect(ch)
+	pc.cacheMisses.Collect(ch)
+	pc.cacheSets.Collect(ch)
+	pc.cacheDeletes.Collect(ch)
+	pc.cacheErrors.Collect(ch)
+	pc.circuitOpens.Collect(ch)
+	pc.circuitState.Collect(ch)
+	pc.queueDepth.Collect(ch)
+	pc.droppedWrites.Collect(ch)
+	pc.asyncWrites.Collect(ch)
+	pc.asyncErrors.Collect(ch)
+	pc.getLatency.Collect(ch)
+	pc.setLatency.Collect(ch)
+	pc.deleteLatency.Collect(ch)
+	pc.asyncLatency.Collect(ch)
+	pc.chainHits.Collect(ch)
+	pc.chainMisses.Collect(ch)
+	pc.chainLatency.Collect(ch)
+}
+
 // RecordGet records a cache get operation.
 func (pc *PrometheusCollector) RecordGet(layer string, hit bool, duration time.Duration) {
 	if hit {

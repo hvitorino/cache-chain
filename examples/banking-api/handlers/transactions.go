@@ -47,7 +47,6 @@ func (h *TransactionHandler) GetTransaction(w http.ResponseWriter, r *http.Reque
 	}
 
 	duration := time.Since(start)
-	log.Printf("✓ Retrieved %s (took %v)", cacheKey, duration)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Response-Time", duration.String())
