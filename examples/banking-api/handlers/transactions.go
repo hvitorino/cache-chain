@@ -86,12 +86,6 @@ func (h *TransactionHandler) CreateTransaction(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Cache the new transaction in L1 and L2 (L3 PostgreSQL is read-only cache)
-	cacheKey := fmt.Sprintf("transaction:%s", tx.ID)
-	if err := h.cache.Set(ctx, cacheKey, tx, 5*time.Minute); err != nil {
-		log.Printf("Warning: failed to cache new transaction: %v", err)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(tx)
