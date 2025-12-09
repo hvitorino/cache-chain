@@ -14,15 +14,27 @@ import (
 	"cache-chain/pkg/cache/memory"
 	"cache-chain/pkg/cache/redis"
 	"cache-chain/pkg/chain"
+	"cache-chain/pkg/logging"
 	promMetrics "cache-chain/pkg/metrics/prometheus"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
 func main() {
-	log.Println("🚀 Starting Banking API with 3-Layer Cache...")
+	// Initialize logger from environment
+	logger, err := logging.NewLoggerFromEnv()
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.Sync()
+
+	// Set global logger
+	logging.SetGlobal(logger)
+
+	logger.Info("🚀 Starting Banking API with 3-Layer Cache...")
 
 	// Layer 1: Memory Cache (fastest)
 	memConfig := memory.MemoryCacheConfig{
@@ -30,20 +42,22 @@ func main() {
 		MaxSize:         1000,
 		DefaultTTL:      5 * time.Minute,
 		CleanupInterval: 1 * time.Minute,
+		Logger:          logger,
 	}
 	memCache := memory.NewMemoryCache(memConfig)
-	log.Println("✓ Layer 1 (Memory) initialized")
+	logger.Info("✓ Layer 1 (Memory) initialized")
 
 	// Layer 2: Redis Cache (fast)
 	redisConfig := redis.DefaultRedisCacheConfig()
 	redisConfig.Name = "L2-Redis"
 	redisConfig.Addr = getEnv("REDIS_ADDR", "localhost:6379")
+	redisConfig.Logger = logger
 	redisCache, err := redis.NewRedisCache(redisConfig)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 	defer redisCache.Close()
-	log.Println("✓ Layer 2 (Redis) initialized")
+	logger.Info("✓ Layer 2 (Redis) initialized")
 
 	// Layer 3: PostgreSQL (slowest, persistent)
 	pgConfig := postgres.Config{
@@ -56,10 +70,10 @@ func main() {
 	}
 	pgAdapter, err := postgres.NewPostgresAdapter(pgConfig)
 	if err != nil {
-		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
+		logger.Fatal("Failed to connect to PostgreSQL", zap.Error(err))
 	}
 	defer pgAdapter.Close()
-	log.Println("✓ Layer 3 (PostgreSQL) initialized")
+	logger.Info("✓ Layer 3 (PostgreSQL) initialized")
 
 	// Setup Prometheus metrics collector
 	metricsCollector := promMetrics.NewPrometheusCollector("banking_api")
@@ -67,20 +81,21 @@ func main() {
 	// Register cache metrics with Prometheus
 	// We need to register each collector individually with the default registry
 	prometheus.MustRegister(metricsCollector)
-	log.Println("✓ Prometheus metrics initialized and registered")
+	logger.Info("✓ Prometheus metrics initialized and registered")
 
 	// Create 3-layer cache chain with metrics: Memory -> Redis -> PostgreSQL
 	cacheChain, err := chain.NewWithConfig(
 		chain.ChainConfig{
 			Metrics: metricsCollector,
+			Logger:  logger,
 		},
 		memCache, redisCache, pgAdapter,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create cache chain: %v", err)
+		logger.Fatal("Failed to create cache chain", zap.Error(err))
 	}
-	log.Println("✓ 3-Layer cache chain created with metrics")
-	log.Println("  Cache flow: Memory (L1) → Redis (L2) → PostgreSQL (L3)")
+	logger.Info("✓ 3-Layer cache chain created with metrics")
+	logger.Info("  Cache flow: Memory (L1) → Redis (L2) → PostgreSQL (L3)")
 
 	// Setup handlers
 	handler := handlers.NewTransactionHandler(pgAdapter, cacheChain)
@@ -108,15 +123,15 @@ func main() {
 
 	// Start server in background
 	go func() {
-		log.Printf("🌐 Server listening on port %s", port)
-		log.Println("\n📚 Available endpoints:")
-		log.Println("  POST   /transactions       - Create new transaction")
-		log.Println("  GET    /transactions/{id}  - Get transaction by ID")
-		log.Println("  GET    /health             - Health check")
-		log.Println("  GET    /metrics            - Prometheus metrics")
-		log.Println()
+		logger.Info("🌐 Server listening", zap.String("port", port))
+		logger.Info("\n📚 Available endpoints:")
+		logger.Info("  POST   /transactions       - Create new transaction")
+		logger.Info("  GET    /transactions/{id}  - Get transaction by ID")
+		logger.Info("  GET    /health             - Health check")
+		logger.Info("  GET    /metrics            - Prometheus metrics")
+		logger.Info("")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+			logger.Fatal("Server failed", zap.Error(err))
 		}
 	}()
 
@@ -125,15 +140,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("\n🛑 Shutting down server...")
+	logger.Info("\n🛑 Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		logger.Error("Server shutdown error", zap.Error(err))
 	}
 
-	log.Println("✓ Server stopped gracefully")
+	logger.Info("✓ Server stopped gracefully")
 }
 
 // HTTP metrics

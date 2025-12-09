@@ -7,6 +7,9 @@ import (
 	"unicode"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/logging"
+
+	"go.uber.org/zap"
 )
 
 // MemoryCache is an in-memory cache implementation that satisfies the CacheLayer interface.
@@ -29,6 +32,9 @@ type MemoryCache struct {
 
 	// wg waits for cleanup goroutine to finish
 	wg sync.WaitGroup
+
+	// logger for structured logging
+	logger *logging.Logger
 }
 
 // entry represents a cache entry with metadata for LRU and TTL
@@ -53,6 +59,9 @@ type MemoryCacheConfig struct {
 
 	// CleanupInterval is how often to check for expired entries
 	CleanupInterval time.Duration
+
+	// Logger for structured logging (optional, uses global if nil)
+	Logger *logging.Logger
 }
 
 // NewMemoryCache creates a new in-memory cache with the given configuration.
@@ -69,12 +78,26 @@ func NewMemoryCache(config MemoryCacheConfig) *MemoryCache {
 		config.CleanupInterval = time.Minute
 	}
 
+	// Set logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.Global()
+	}
+
 	cache := &MemoryCache{
 		data:          make(map[string]*entry),
 		config:        config,
 		stopCleanup:   make(chan struct{}),
 		cleanupTicker: time.NewTicker(config.CleanupInterval),
+		logger:        logger.Named(config.Name),
 	}
+
+	cache.logger.Info("memory cache initialized",
+		zap.String("name", config.Name),
+		zap.Int("max_size", config.MaxSize),
+		zap.Duration("default_ttl", config.DefaultTTL),
+		zap.Duration("cleanup_interval", config.CleanupInterval),
+	)
 
 	// Start background cleanup
 	cache.wg.Add(1)
@@ -87,6 +110,10 @@ func NewMemoryCache(config MemoryCacheConfig) *MemoryCache {
 // Returns the value and nil error if found, or an error if not found or operation failed.
 func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) {
 	if err := validateKey(key); err != nil {
+		c.logger.Debug("invalid key",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return nil, err
 	}
 
@@ -95,17 +122,29 @@ func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) 
 	c.mu.RUnlock()
 
 	if !exists {
+		c.logger.Debug("cache miss - key not found",
+			zap.String("key", key),
+		)
 		return nil, cache.ErrKeyNotFound
 	}
 
 	// Check if expired
 	if time.Now().After(entry.expiresAt) {
+		c.logger.Debug("cache miss - key expired",
+			zap.String("key", key),
+			zap.Time("expired_at", entry.expiresAt),
+		)
 		// Remove expired entry
 		c.mu.Lock()
 		delete(c.data, key)
 		c.mu.Unlock()
 		return nil, cache.ErrKeyNotFound
 	}
+
+	c.logger.Debug("cache hit",
+		zap.String("key", key),
+		zap.Duration("ttl_remaining", time.Until(entry.expiresAt)),
+	)
 
 	// Update access time for LRU
 	c.mu.Lock()
@@ -120,6 +159,10 @@ func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) 
 // Enforces MaxSize by evicting LRU entries if necessary.
 func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	if err := validateKey(key); err != nil {
+		c.logger.Debug("invalid key",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return err
 	}
 
@@ -148,9 +191,20 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 
 		// Evict LRU entry
 		if lruKey != "" {
+			c.logger.Debug("evicting LRU entry",
+				zap.String("evicted_key", lruKey),
+				zap.String("new_key", key),
+				zap.Int("cache_size", len(c.data)),
+			)
 			delete(c.data, lruKey)
 		}
 	}
+
+	c.logger.Debug("cache set",
+		zap.String("key", key),
+		zap.Duration("ttl", ttl),
+		zap.Time("expires_at", expiresAt),
+	)
 
 	// Store the entry
 	c.data[key] = &entry{
@@ -168,12 +222,22 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 // Returns nil even if the key doesn't exist.
 func (c *MemoryCache) Delete(ctx context.Context, key string) error {
 	if err := validateKey(key); err != nil {
+		c.logger.Debug("invalid key",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return err
 	}
 
 	c.mu.Lock()
+	_, exists := c.data[key]
 	delete(c.data, key)
 	c.mu.Unlock()
+
+	c.logger.Debug("cache delete",
+		zap.String("key", key),
+		zap.Bool("existed", exists),
+	)
 
 	return nil
 }

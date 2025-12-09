@@ -115,12 +115,23 @@ make down
 cd examples/banking-api
 docker-compose up -d
 
+# With debug logs
+LOG_LEVEL=debug docker-compose up -d
+
+# With console format logs (easier to read)
+LOG_FORMAT=console docker-compose up -d
+
+# Development mode (debug level + console format)
+LOG_DEV=true docker-compose up
+
 # Check logs
 docker-compose logs -f api
 
 # Stop all services
 docker-compose down
 ```
+
+For detailed logging configuration, see [LOGGING.md](LOGGING.md).
 
 ### Manual Setup
 

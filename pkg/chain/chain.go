@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/logging"
 	"cache-chain/pkg/metrics"
 	"cache-chain/pkg/resilience"
 	"cache-chain/pkg/writer"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -22,6 +24,7 @@ type Chain struct {
 	sf          *singleflight.Group
 	metrics     metrics.MetricsCollector
 	ttlStrategy TTLStrategy
+	logger      *logging.Logger
 }
 
 // ChainConfig holds configuration for Chain creation.
@@ -37,6 +40,9 @@ type ChainConfig struct {
 
 	// TTLStrategy for hierarchical TTL management (optional, defaults to UniformTTLStrategy)
 	TTLStrategy TTLStrategy
+
+	// Logger for structured logging (optional, uses global if nil)
+	Logger *logging.Logger
 }
 
 // New creates a new chain of cache layers with default configuration.
@@ -62,6 +68,23 @@ func NewWithConfig(config ChainConfig, layers ...cache.CacheLayer) (*Chain, erro
 	if config.TTLStrategy == nil {
 		config.TTLStrategy = &UniformTTLStrategy{}
 	}
+
+	// Set logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.Global()
+	}
+
+	logger.Info("initializing cache chain",
+		zap.Int("num_layers", len(layers)),
+		zap.Strings("layer_names", func() []string {
+			names := make([]string, len(layers))
+			for i, l := range layers {
+				names[i] = l.Name()
+			}
+			return names
+		}()),
+	)
 
 	// Wrap each layer with resilience protection
 	resilientLayers := make([]cache.CacheLayer, len(layers))
@@ -107,12 +130,17 @@ func NewWithConfig(config ChainConfig, layers ...cache.CacheLayer) (*Chain, erro
 		writers[i] = writer.NewAsyncWriterWithMetrics(layer, writerConfig, config.Metrics)
 	}
 
+	logger.Info("cache chain initialized successfully",
+		zap.Int("num_layers", len(resilientLayers)),
+	)
+
 	return &Chain{
 		layers:      resilientLayers,
 		writers:     writers,
 		sf:          &singleflight.Group{},
 		metrics:     config.Metrics,
 		ttlStrategy: config.TTLStrategy,
+		logger:      logger,
 	}, nil
 }
 
@@ -141,10 +169,30 @@ func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, e
 	var lastErr error
 	hitLayer := -1
 
+	c.logger.Debug("chain get started",
+		zap.String("key", key),
+	)
+
 	// Track metrics at the end
 	defer func() {
 		hit := hitLayer >= 0
-		c.metrics.RecordChainGet(hit, hitLayer, time.Since(start))
+		duration := time.Since(start)
+		c.metrics.RecordChainGet(hit, hitLayer, duration)
+
+		if hit {
+			c.logger.Debug("chain get completed",
+				zap.String("key", key),
+				zap.Int("hit_layer", hitLayer),
+				zap.String("layer_name", c.layers[hitLayer].Name()),
+				zap.Duration("duration", duration),
+			)
+		} else {
+			c.logger.Warn("chain get miss - all layers",
+				zap.String("key", key),
+				zap.Duration("duration", duration),
+				zap.Error(lastErr),
+			)
+		}
 	}()
 
 	for i, layer := range c.layers {
@@ -188,6 +236,12 @@ func (c *Chain) warmUpperLayers(ctx context.Context, key string, value interface
 	// Warm up from hit layer up to L1
 	// Use a reasonable default TTL for warm-up (1 hour)
 	baseTTL := time.Hour
+
+	c.logger.Debug("warming upper layers",
+		zap.String("key", key),
+		zap.Int("hit_layer", hitIndex),
+		zap.Int("layers_to_warm", hitIndex),
+	)
 
 	for i := hitIndex - 1; i >= 0; i-- {
 		// Calculate TTL for this layer using strategy

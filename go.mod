@@ -17,6 +17,8 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/redis/rueidis v1.0.69 // indirect
 	github.com/sony/gobreaker v1.0.0 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect

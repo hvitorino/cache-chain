@@ -48,6 +48,10 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: banking_db
       REDIS_ADDR: redis:6379
+      # Logging configuration
+      LOG_LEVEL: "${LOG_LEVEL:-info}"  # debug, info, warn, error
+      LOG_FORMAT: "${LOG_FORMAT:-json}"  # json or console
+      LOG_DEV: "${LOG_DEV:-false}"  # true for development mode
     depends_on:
       postgres:
         condition: service_healthy

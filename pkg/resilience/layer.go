@@ -5,9 +5,11 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/logging"
 	"cache-chain/pkg/metrics"
 
 	"github.com/sony/gobreaker"
+	"go.uber.org/zap"
 )
 
 // ResilientLayer wraps a CacheLayer with resilience features including
@@ -17,6 +19,7 @@ type ResilientLayer struct {
 	cb      *gobreaker.CircuitBreaker
 	timeout time.Duration
 	metrics metrics.MetricsCollector
+	logger  *logging.Logger
 }
 
 // NewResilientLayer creates a new resilient layer wrapper around the given cache layer.
@@ -27,11 +30,22 @@ func NewResilientLayer(layer cache.CacheLayer, config ResilientConfig) *Resilien
 
 // NewResilientLayerWithMetrics creates a new resilient layer with custom metrics collector.
 func NewResilientLayerWithMetrics(layer cache.CacheLayer, config ResilientConfig, metricsCollector metrics.MetricsCollector) *ResilientLayer {
+	logger := logging.Global().Named("resilience").Named(layer.Name())
+
 	rl := &ResilientLayer{
 		layer:   layer,
 		timeout: config.Timeout,
 		metrics: metricsCollector,
+		logger:  logger,
 	}
+
+	logger.Info("resilient layer initialized",
+		zap.String("layer", layer.Name()),
+		zap.Duration("timeout", config.Timeout),
+		zap.Uint32("max_requests", config.CircuitBreakerConfig.MaxRequests),
+		zap.Duration("circuit_interval", config.CircuitBreakerConfig.Interval),
+		zap.Duration("circuit_timeout", config.CircuitBreakerConfig.Timeout),
+	)
 
 	// Convert our config to gobreaker settings
 	settings := gobreaker.Settings{
@@ -53,6 +67,13 @@ func NewResilientLayerWithMetrics(layer cache.CacheLayer, config ResilientConfig
 			return counts.ConsecutiveFailures >= 5
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			// Log state change
+			logger.Warn("circuit breaker state changed",
+				zap.String("layer", name),
+				zap.String("from", from.String()),
+				zap.String("to", to.String()),
+			)
+
 			// Report circuit breaker state changes to metrics
 			var state metrics.CircuitState
 			switch to {
@@ -102,10 +123,20 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.logger.Warn("circuit breaker open - request rejected",
+				zap.String("operation", "get"),
+				zap.String("key", key),
+			)
 			return nil, cache.ErrCircuitOpen
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.logger.Warn("operation timeout",
+				zap.String("operation", "get"),
+				zap.String("key", key),
+				zap.Duration("timeout", rl.timeout),
+				zap.Duration("elapsed", duration),
+			)
 			return nil, cache.ErrTimeout
 		}
 		return nil, err

@@ -8,14 +8,17 @@ import (
 	"time"
 
 	"cache-chain/pkg/cache"
+	"cache-chain/pkg/logging"
 
 	"github.com/redis/rueidis"
+	"go.uber.org/zap"
 )
 
 type RedisCache struct {
 	client rueidis.Client
 	name   string
 	config RedisCacheConfig
+	logger *logging.Logger
 }
 
 type RedisCacheConfig struct {
@@ -48,6 +51,8 @@ type RedisCacheConfig struct {
 	SentinelAddrs    []string
 	SentinelUsername string
 	SentinelPassword string
+	// Logger for structured logging (optional, uses global if nil)
+	Logger *logging.Logger
 }
 
 func DefaultRedisCacheConfig() RedisCacheConfig {
@@ -144,11 +149,28 @@ func NewRedisCache(config RedisCacheConfig) (*RedisCache, error) {
 		return nil, fmt.Errorf("redis: failed to ping server: %w", err)
 	}
 
-	return &RedisCache{
+	// Set logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.Global()
+	}
+
+	redisCache := &RedisCache{
 		client: client,
 		name:   config.Name,
 		config: config,
-	}, nil
+		logger: logger.Named(config.Name),
+	}
+
+	redisCache.logger.Info("redis cache initialized",
+		zap.String("name", config.Name),
+		zap.Strings("addresses", initAddress),
+		zap.String("key_prefix", config.KeyPrefix),
+		zap.Bool("cluster_mode", len(config.ClusterAddrs) > 0),
+		zap.Bool("sentinel_mode", len(config.SentinelAddrs) > 0),
+	)
+
+	return redisCache, nil
 }
 
 func (r *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
@@ -159,20 +181,41 @@ func (r *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
 
 	if err := resp.Error(); err != nil {
 		if rueidis.IsRedisNil(err) {
+			r.logger.Debug("cache miss",
+				zap.String("key", key),
+				zap.String("full_key", fullKey),
+			)
 			return nil, cache.ErrCacheMiss
 		}
+		r.logger.Error("redis get error",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("redis get: %w", err)
 	}
 
 	data, err := resp.AsBytes()
 	if err != nil {
+		r.logger.Error("failed to read response",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("redis get: failed to read response: %w", err)
 	}
 
 	var value interface{}
 	if err := json.Unmarshal(data, &value); err != nil {
+		r.logger.Error("failed to unmarshal",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("redis get: failed to unmarshal: %w", err)
 	}
+
+	r.logger.Debug("cache hit",
+		zap.String("key", key),
+		zap.Int("value_size", len(data)),
+	)
 
 	return value, nil
 }
@@ -182,13 +225,28 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, ttl
 
 	data, err := json.Marshal(value)
 	if err != nil {
+		r.logger.Error("failed to marshal",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return fmt.Errorf("redis set: failed to marshal: %w", err)
 	}
 
 	cmd := r.client.B().Set().Key(fullKey).Value(string(data)).Ex(ttl).Build()
 	if err := r.client.Do(ctx, cmd).Error(); err != nil {
+		r.logger.Error("redis set error",
+			zap.String("key", key),
+			zap.Duration("ttl", ttl),
+			zap.Error(err),
+		)
 		return fmt.Errorf("redis set: %w", err)
 	}
+
+	r.logger.Debug("cache set",
+		zap.String("key", key),
+		zap.Duration("ttl", ttl),
+		zap.Int("value_size", len(data)),
+	)
 
 	return nil
 }
@@ -197,9 +255,23 @@ func (r *RedisCache) Delete(ctx context.Context, key string) error {
 	fullKey := r.config.KeyPrefix + key
 
 	cmd := r.client.B().Del().Key(fullKey).Build()
-	if err := r.client.Do(ctx, cmd).Error(); err != nil {
+	resp := r.client.Do(ctx, cmd)
+
+	if err := resp.Error(); err != nil {
+		r.logger.Error("redis delete error",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return fmt.Errorf("redis delete: %w", err)
 	}
+
+	// Get number of keys deleted
+	deleted, _ := resp.AsInt64()
+
+	r.logger.Debug("cache delete",
+		zap.String("key", key),
+		zap.Bool("existed", deleted > 0),
+	)
 
 	return nil
 }
