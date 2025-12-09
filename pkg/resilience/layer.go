@@ -123,6 +123,7 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.metrics.RecordError(layerName, "get", "circuit_breaker_open")
 			rl.logger.Warn("circuit breaker open - request rejected",
 				zap.String("operation", "get"),
 				zap.String("key", key),
@@ -131,6 +132,7 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.metrics.RecordError(layerName, "get", "timeout")
 			rl.logger.Warn("operation timeout",
 				zap.String("operation", "get"),
 				zap.String("key", key),
@@ -139,11 +141,14 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 			)
 			return nil, cache.ErrTimeout
 		}
-		// Log other errors
+		// Log and record other errors
+		errorType := cache.ClassifyError(err)
+		rl.metrics.RecordError(layerName, "get", errorType)
 		rl.logger.Error("get operation failed",
 			zap.String("operation", "get"),
 			zap.String("key", key),
 			zap.Duration("duration", duration),
+			zap.String("error_type", errorType),
 			zap.Error(err),
 		)
 		return nil, err
@@ -177,6 +182,7 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.metrics.RecordError(layerName, "set", "circuit_breaker_open")
 			rl.logger.Warn("circuit breaker open - request rejected",
 				zap.String("operation", "set"),
 			)
@@ -184,6 +190,7 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.metrics.RecordError(layerName, "set", "timeout")
 			rl.logger.Warn("operation timeout",
 				zap.String("operation", "set"),
 				zap.Duration("timeout", rl.timeout),
@@ -191,11 +198,14 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 			)
 			return cache.ErrTimeout
 		}
-		// Log other errors
+		// Log and record other errors
+		errorType := cache.ClassifyError(err)
+		rl.metrics.RecordError(layerName, "set", errorType)
 		rl.logger.Error("set operation failed",
 			zap.String("operation", "set"),
 			zap.Duration("ttl", ttl),
 			zap.Duration("duration", duration),
+			zap.String("error_type", errorType),
 			zap.Error(err),
 		)
 		return err
@@ -229,6 +239,7 @@ func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.metrics.RecordError(layerName, "delete", "circuit_breaker_open")
 			rl.logger.Warn("circuit breaker open - request rejected",
 				zap.String("operation", "delete"),
 				zap.String("key", key),
@@ -237,6 +248,7 @@ func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.metrics.RecordError(layerName, "delete", "timeout")
 			rl.logger.Warn("operation timeout",
 				zap.String("operation", "delete"),
 				zap.String("key", key),
@@ -245,11 +257,14 @@ func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
 			)
 			return cache.ErrTimeout
 		}
-		// Log other errors
+		// Log and record other errors
+		errorType := cache.ClassifyError(err)
+		rl.metrics.RecordError(layerName, "delete", errorType)
 		rl.logger.Error("delete operation failed",
 			zap.String("operation", "delete"),
 			zap.String("key", key),
 			zap.Duration("duration", duration),
+			zap.String("error_type", errorType),
 			zap.Error(err),
 		)
 		return err

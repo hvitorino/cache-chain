@@ -81,9 +81,9 @@ func NewPrometheusCollector(namespace string) *PrometheusCollector {
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "cache_errors_total",
-				Help:      "Total number of cache errors per layer and operation",
+				Help:      "Total number of cache errors per layer, operation and error type",
 			},
-			[]string{"layer", "operation"},
+			[]string{"layer", "operation", "error_type"},
 		),
 		circuitOpens: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -289,7 +289,7 @@ func (pc *PrometheusCollector) RecordGet(layer string, hit bool, duration time.D
 func (pc *PrometheusCollector) RecordSet(layer string, success bool, duration time.Duration) {
 	pc.cacheSets.WithLabelValues(layer).Inc()
 	if !success {
-		pc.cacheErrors.WithLabelValues(layer, "set").Inc()
+		pc.cacheErrors.WithLabelValues(layer, "set", "other").Inc()
 	}
 	pc.setLatency.WithLabelValues(layer).Observe(duration.Seconds())
 }
@@ -298,7 +298,7 @@ func (pc *PrometheusCollector) RecordSet(layer string, success bool, duration ti
 func (pc *PrometheusCollector) RecordDelete(layer string, success bool, duration time.Duration) {
 	pc.cacheDeletes.WithLabelValues(layer).Inc()
 	if !success {
-		pc.cacheErrors.WithLabelValues(layer, "delete").Inc()
+		pc.cacheErrors.WithLabelValues(layer, "delete", "other").Inc()
 	}
 	pc.deleteLatency.WithLabelValues(layer).Observe(duration.Seconds())
 }
@@ -330,6 +330,11 @@ func (pc *PrometheusCollector) RecordAsyncWrite(layer string, success bool, dura
 	}
 	pc.asyncWrites.WithLabelValues(layer, status).Inc()
 	pc.asyncLatency.WithLabelValues(layer).Observe(duration.Seconds())
+}
+
+// RecordError records a typed cache error.
+func (pc *PrometheusCollector) RecordError(layer, operation, errorType string) {
+	pc.cacheErrors.WithLabelValues(layer, operation, errorType).Inc()
 }
 
 // RecordChainGet records a chain-level get operation.

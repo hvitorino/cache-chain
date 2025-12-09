@@ -11,6 +11,7 @@ type MetricsCollector interface {
 	RecordGet(layer string, hit bool, duration time.Duration)
 	RecordSet(layer string, success bool, duration time.Duration)
 	RecordDelete(layer string, success bool, duration time.Duration)
+	RecordError(layer, operation, errorType string)
 
 	// Circuit breaker
 	RecordCircuitState(layer string, state CircuitState)
@@ -62,6 +63,9 @@ func (NoOpCollector) RecordSet(layer string, success bool, duration time.Duratio
 
 // RecordDelete does nothing.
 func (NoOpCollector) RecordDelete(layer string, success bool, duration time.Duration) {}
+
+// RecordError does nothing.
+func (NoOpCollector) RecordError(layer, operation, errorType string) {}
 
 // RecordCircuitState does nothing.
 func (NoOpCollector) RecordCircuitState(layer string, state CircuitState) {}
