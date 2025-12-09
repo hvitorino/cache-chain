@@ -139,6 +139,13 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 			)
 			return nil, cache.ErrTimeout
 		}
+		// Log other errors
+		rl.logger.Error("get operation failed",
+			zap.String("operation", "get"),
+			zap.String("key", key),
+			zap.Duration("duration", duration),
+			zap.Error(err),
+		)
 		return nil, err
 	}
 
@@ -170,12 +177,27 @@ func (rl *ResilientLayer) Set(ctx context.Context, key string, value interface{}
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.logger.Warn("circuit breaker open - request rejected",
+				zap.String("operation", "set"),
+			)
 			return cache.ErrCircuitOpen
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.logger.Warn("operation timeout",
+				zap.String("operation", "set"),
+				zap.Duration("timeout", rl.timeout),
+				zap.Duration("elapsed", duration),
+			)
 			return cache.ErrTimeout
 		}
+		// Log other errors
+		rl.logger.Error("set operation failed",
+			zap.String("operation", "set"),
+			zap.Duration("ttl", ttl),
+			zap.Duration("duration", duration),
+			zap.Error(err),
+		)
 		return err
 	}
 
@@ -207,12 +229,29 @@ func (rl *ResilientLayer) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		// Convert gobreaker.ErrOpenState to our error type
 		if err == gobreaker.ErrOpenState {
+			rl.logger.Warn("circuit breaker open - request rejected",
+				zap.String("operation", "delete"),
+				zap.String("key", key),
+			)
 			return cache.ErrCircuitOpen
 		}
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			rl.logger.Warn("operation timeout",
+				zap.String("operation", "delete"),
+				zap.String("key", key),
+				zap.Duration("timeout", rl.timeout),
+				zap.Duration("elapsed", duration),
+			)
 			return cache.ErrTimeout
 		}
+		// Log other errors
+		rl.logger.Error("delete operation failed",
+			zap.String("operation", "delete"),
+			zap.String("key", key),
+			zap.Duration("duration", duration),
+			zap.Error(err),
+		)
 		return err
 	}
 

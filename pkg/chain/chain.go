@@ -207,10 +207,21 @@ func (c *Chain) getWithFallback(ctx context.Context, key string) (interface{}, e
 		if err != nil {
 			// Check if it's a "not found" error - continue to next layer
 			if cache.IsNotFound(err) {
+				c.logger.Debug("layer miss",
+					zap.String("key", key),
+					zap.Int("layer_index", i),
+					zap.String("layer_name", layer.Name()),
+				)
 				lastErr = err
 				continue
 			}
 			// Other errors (timeout, unavailable) - skip this layer but continue
+			c.logger.Warn("layer error - falling back to next",
+				zap.String("key", key),
+				zap.Int("layer_index", i),
+				zap.String("layer_name", layer.Name()),
+				zap.Error(err),
+			)
 			lastErr = err
 			continue
 		}
