@@ -47,11 +47,17 @@ func DefaultResilientConfig() ResilientConfig {
 	return ResilientConfig{
 		Timeout: 5 * time.Second,
 		CircuitBreakerConfig: CircuitBreakerConfig{
-			MaxRequests: 1,
-			Interval:    0,
-			Timeout:     10 * time.Second,
+			MaxRequests: 5,
+			Interval:    60 * time.Second,
+			Timeout:     30 * time.Second,
 			ReadyToTrip: func(counts Counts) bool {
-				return counts.ConsecutiveFailures >= 5
+				// Require at least 20 requests before considering error rate
+				if counts.Requests < 20 {
+					return false
+				}
+				// Trip if error rate >= 15%
+				failureRate := float64(counts.TotalFailures) / float64(counts.Requests)
+				return failureRate >= 0.15
 			},
 		},
 	}

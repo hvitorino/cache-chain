@@ -16,6 +16,7 @@ import (
 	"cache-chain/pkg/chain"
 	"cache-chain/pkg/logging"
 	promMetrics "cache-chain/pkg/metrics/prometheus"
+	"cache-chain/pkg/resilience"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
@@ -86,6 +87,56 @@ func main() {
 	// Create 3-layer cache chain with metrics: Memory -> Redis -> PostgreSQL
 	cacheChain, err := chain.NewWithConfig(
 		chain.ChainConfig{
+			ResilientConfigs: []resilience.ResilientConfig{
+				// L1 (Memory): Super tolerant - almost never opens
+				{
+					Timeout: 2 * time.Second,
+					CircuitBreakerConfig: resilience.CircuitBreakerConfig{
+						MaxRequests: 10,
+						Interval:    30 * time.Second,
+						Timeout:     60 * time.Second,
+						ReadyToTrip: func(counts resilience.Counts) bool {
+							if counts.Requests < 100 {
+								return false
+							}
+							failureRate := float64(counts.TotalFailures) / float64(counts.Requests)
+							return failureRate >= 0.15
+						},
+					},
+				},
+				// L2 (Redis): Very tolerant
+				{
+					Timeout: 3 * time.Second,
+					CircuitBreakerConfig: resilience.CircuitBreakerConfig{
+						MaxRequests: 10,
+						Interval:    45 * time.Second,
+						Timeout:     90 * time.Second,
+						ReadyToTrip: func(counts resilience.Counts) bool {
+							if counts.Requests < 50 {
+								return false
+							}
+							failureRate := float64(counts.TotalFailures) / float64(counts.Requests)
+							return failureRate >= 0.7
+						},
+					},
+				},
+				// L3 (PostgreSQL): Extremely tolerant - last resort
+				{
+					Timeout: 10 * time.Second,
+					CircuitBreakerConfig: resilience.CircuitBreakerConfig{
+						MaxRequests: 15,
+						Interval:    60 * time.Second,
+						Timeout:     120 * time.Second,
+						ReadyToTrip: func(counts resilience.Counts) bool {
+							if counts.Requests < 30 {
+								return false
+							}
+							failureRate := float64(counts.TotalFailures) / float64(counts.Requests)
+							return failureRate >= 0.15
+						},
+					},
+				},
+			},
 			Metrics: metricsCollector,
 			Logger:  logger,
 		},

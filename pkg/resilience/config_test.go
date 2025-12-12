@@ -12,25 +12,41 @@ func TestDefaultResilientConfig(t *testing.T) {
 		t.Errorf("Expected timeout 5s, got %v", config.Timeout)
 	}
 
-	if config.CircuitBreakerConfig.MaxRequests != 1 {
-		t.Errorf("Expected MaxRequests 1, got %d", config.CircuitBreakerConfig.MaxRequests)
+	if config.CircuitBreakerConfig.MaxRequests != 5 {
+		t.Errorf("Expected MaxRequests 5, got %d", config.CircuitBreakerConfig.MaxRequests)
 	}
 
-	if config.CircuitBreakerConfig.Timeout != 10*time.Second {
-		t.Errorf("Expected CB timeout 10s, got %v", config.CircuitBreakerConfig.Timeout)
+	if config.CircuitBreakerConfig.Interval != 60*time.Second {
+		t.Errorf("Expected Interval 60s, got %v", config.CircuitBreakerConfig.Interval)
+	}
+
+	if config.CircuitBreakerConfig.Timeout != 30*time.Second {
+		t.Errorf("Expected CB timeout 30s, got %v", config.CircuitBreakerConfig.Timeout)
 	}
 
 	if config.CircuitBreakerConfig.ReadyToTrip == nil {
 		t.Error("Expected ReadyToTrip function to be set")
 	}
 
-	// Test ReadyToTrip function
-	if config.CircuitBreakerConfig.ReadyToTrip(Counts{ConsecutiveFailures: 4}) {
-		t.Error("Should not trip with 4 failures")
+	// Test ReadyToTrip function with error rate threshold
+	// Should not trip with < 20 requests
+	if config.CircuitBreakerConfig.ReadyToTrip(Counts{Requests: 10, TotalFailures: 5}) {
+		t.Error("Should not trip with < 20 requests")
 	}
 
-	if !config.CircuitBreakerConfig.ReadyToTrip(Counts{ConsecutiveFailures: 5}) {
-		t.Error("Should trip with 5 failures")
+	// Should not trip with error rate < 15% (2 failures in 20 requests = 10%)
+	if config.CircuitBreakerConfig.ReadyToTrip(Counts{Requests: 20, TotalFailures: 2}) {
+		t.Error("Should not trip with 10% error rate")
+	}
+
+	// Should trip with error rate >= 15% (3 failures in 20 requests = 15%)
+	if !config.CircuitBreakerConfig.ReadyToTrip(Counts{Requests: 20, TotalFailures: 3}) {
+		t.Error("Should trip with 15% error rate")
+	}
+
+	// Should trip with error rate > 15% (10 failures in 50 requests = 20%)
+	if !config.CircuitBreakerConfig.ReadyToTrip(Counts{Requests: 50, TotalFailures: 10}) {
+		t.Error("Should trip with 20% error rate")
 	}
 }
 
@@ -57,7 +73,7 @@ func TestResilientConfig_WithCircuitBreakerTimeout(t *testing.T) {
 	}
 
 	// Verify original is unchanged
-	if config.CircuitBreakerConfig.Timeout != 10*time.Second {
+	if config.CircuitBreakerConfig.Timeout != 30*time.Second {
 		t.Errorf("Original config changed: got %v", config.CircuitBreakerConfig.Timeout)
 	}
 }

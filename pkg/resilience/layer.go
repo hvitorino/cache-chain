@@ -99,6 +99,7 @@ func (rl *ResilientLayer) Name() string {
 }
 
 // Get retrieves a value from the cache with timeout and circuit breaker protection.
+// Note: ErrKeyNotFound (cache miss) is NOT considered a failure for the circuit breaker.
 func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, error) {
 	start := time.Now()
 	layerName := rl.layer.Name()
@@ -111,25 +112,40 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 	}
 
 	// Execute through circuit breaker
+	// IMPORTANT: We need to distinguish between cache misses (not a failure) and real errors
+	var actualErr error
 	result, err := rl.cb.Execute(func() (interface{}, error) {
-		return rl.layer.Get(ctx, key)
+		value, err := rl.layer.Get(ctx, key)
+		actualErr = err
+		// Don't treat cache misses as circuit breaker failures
+		if cache.IsNotFound(err) {
+			return nil, nil // Signal success to circuit breaker
+		}
+		return value, err // Real errors count as failures
 	})
 
 	// Record metrics
 	duration := time.Since(start)
-	hit := err == nil
+	hit := actualErr == nil
 	rl.metrics.RecordGet(layerName, hit, duration)
 
-	if err != nil {
-		// Convert gobreaker.ErrOpenState to our error type
-		if err == gobreaker.ErrOpenState {
-			rl.metrics.RecordError(layerName, "get", "circuit_breaker_open")
-			rl.logger.Warn("circuit breaker open - request rejected",
-				zap.String("operation", "get"),
-				zap.String("key", key),
-			)
-			return nil, cache.ErrCircuitOpen
-		}
+	// Handle circuit breaker open state
+	if err == gobreaker.ErrOpenState {
+		rl.metrics.RecordError(layerName, "get", "circuit_breaker_open")
+		rl.logger.Warn("circuit breaker open - request rejected",
+			zap.String("operation", "get"),
+			zap.String("key", key),
+		)
+		return nil, cache.ErrCircuitOpen
+	}
+
+	// If we had a cache miss, return it (but it didn't count as CB failure)
+	if cache.IsNotFound(actualErr) {
+		return nil, actualErr
+	}
+
+	// Handle other errors
+	if actualErr != nil {
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
 			rl.metrics.RecordError(layerName, "get", "timeout")
@@ -142,16 +158,16 @@ func (rl *ResilientLayer) Get(ctx context.Context, key string) (interface{}, err
 			return nil, cache.ErrTimeout
 		}
 		// Log and record other errors
-		errorType := cache.ClassifyError(err)
+		errorType := cache.ClassifyError(actualErr)
 		rl.metrics.RecordError(layerName, "get", errorType)
 		rl.logger.Error("get operation failed",
 			zap.String("operation", "get"),
 			zap.String("key", key),
 			zap.Duration("duration", duration),
 			zap.String("error_type", errorType),
-			zap.Error(err),
+			zap.Error(actualErr),
 		)
-		return nil, err
+		return nil, actualErr
 	}
 
 	return result, nil

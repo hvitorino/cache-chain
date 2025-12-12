@@ -182,14 +182,25 @@ func TestResilientLayer_CircuitBreakerMetrics(t *testing.T) {
 
 	// Create a flaky layer that fails
 	flaky := &flakyLayer{
-		failCount: 10, // Fail 10 times to trip circuit
+		failCount: 30, // Fail 30 times to ensure circuit trips
 	}
 
-	// Create chain with custom resilient config
+	// Create chain with aggressive resilient config that will trip
 	chain, err := NewWithConfig(ChainConfig{
 		Metrics: mc,
 		ResilientConfigs: []resilience.ResilientConfig{
-			resilience.DefaultResilientConfig().WithTimeout(50 * time.Millisecond),
+			{
+				Timeout: 50 * time.Millisecond,
+				CircuitBreakerConfig: resilience.CircuitBreakerConfig{
+					MaxRequests: 1,
+					Interval:    60 * time.Second,
+					Timeout:     10 * time.Second,
+					ReadyToTrip: func(counts resilience.Counts) bool {
+						// Trip after 5 consecutive failures (old behavior for testing)
+						return counts.ConsecutiveFailures >= 5
+					},
+				},
+			},
 		},
 	}, flaky)
 	if err != nil {

@@ -29,6 +29,9 @@ type LayerMetrics struct {
 	Deletes int64
 	Errors  int64
 
+	// Error types (by error_type label)
+	ErrorsByType map[string]int64
+
 	// Circuit breaker
 	CircuitState metrics.CircuitState
 	CircuitOpens int64
@@ -60,7 +63,9 @@ func (mc *MemoryCollector) getOrCreateLayer(layer string) *LayerMetrics {
 	defer mc.mu.Unlock()
 
 	if _, exists := mc.layerMetrics[layer]; !exists {
-		mc.layerMetrics[layer] = &LayerMetrics{}
+		mc.layerMetrics[layer] = &LayerMetrics{
+			ErrorsByType: make(map[string]int64),
+		}
 	}
 	return mc.layerMetrics[layer]
 }
@@ -106,6 +111,20 @@ func (mc *MemoryCollector) RecordDelete(layer string, success bool, duration tim
 		lm.Errors++
 	}
 	lm.DeleteLatencies = append(lm.DeleteLatencies, duration)
+}
+
+// RecordError records an error by type.
+func (mc *MemoryCollector) RecordError(layer, operation, errorType string) {
+	lm := mc.getOrCreateLayer(layer)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	lm.Errors++
+	if lm.ErrorsByType == nil {
+		lm.ErrorsByType = make(map[string]int64)
+	}
+	lm.ErrorsByType[errorType]++
 }
 
 // RecordCircuitState records the current circuit breaker state.
